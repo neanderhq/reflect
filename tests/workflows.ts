@@ -31,6 +31,8 @@ export async function pdfText(bytes:Uint8Array) {
  }}return text;
 }
 async function main(){
+ // This suite owns embedded fixtures; do not inherit the release verifier's PostgreSQL connection.
+ delete process.env.DATABASE_URL;
  await mkdir('.test-data',{recursive:true});const folder=await mkdtemp(join(process.cwd(),'.test-data/workflows-'));
  let client=new PGlite(join(folder,'source'));let db=drizzle(client,{schema});setTestDb(db as unknown as Database);
  const fetchBefore=globalThis.fetch;globalThis.fetch=async()=>{throw new Error('External network forbidden in workflow tests');};

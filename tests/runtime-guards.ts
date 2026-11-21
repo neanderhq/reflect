@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { getDb } from '../server/db';
 import { acquirePgliteLock, pgliteLockPath } from '../server/pglite-lock';
@@ -35,6 +35,7 @@ async function main(){
  const startup=spawnSync(process.execPath,['--import','tsx',process.argv[1],'startup'],{env:{...clean,NODE_ENV:'production',NEXT_RUNTIME:'nodejs',NEXT_PHASE:'',DATABASE_URL:'postgresql://unused.invalid/test'},encoding:'utf8'});
  assert.equal(startup.status,0,startup.stderr);assert.match(startup.stderr,/lattice_scheduler_start skipped/);
  // One process owns a PGlite folder: while a holder runs, a second opener fails fast instead of corrupting data.
+ mkdirSync('.test-data', { recursive: true });
  const dir=`.test-data/lock-guard-${process.pid}`,lock=pgliteLockPath(dir);rmSync(lock,{force:true});
  const holder=spawn(process.execPath,['--import','tsx',process.argv[1],'hold',dir],{stdio:['pipe','pipe','inherit']});
  const [ready]=await once(holder.stdout!,'data');assert.equal(String(ready).trim(),'held');

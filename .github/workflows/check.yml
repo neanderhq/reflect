@@ -19,6 +19,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
+        env:
+          DATABASE_URL: postgresql://unused.invalid/fixture_isolation
       - run: pnpm build
       - run: node tests/standalone-artifacts.mjs
   production:
