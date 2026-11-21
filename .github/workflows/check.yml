@@ -51,7 +51,6 @@ jobs:
           node-version: 24.22.3
       - uses: pnpm/action-setup@v6
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
       - run: docker build -f .neander/Dockerfile -t reflect:ci .
       - run: python3 scripts/test_entrypoint.py
       - run: pnpm db:migrate
