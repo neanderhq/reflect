@@ -1,5 +1,6 @@
 """Verify literal secret handling in the locally built production image."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ class StarterEntrypointTests(unittest.TestCase):
             command = ["node", "-e", "if(require('fs').existsSync('/tmp/neander-entrypoint-executed'))process.exit(2);process.stdout.write(process.env.SENTINEL)"]
             result = subprocess.run([
                 "docker", "run", "--rm", "-v", f"{bundle}:/run/secrets/neander_environment:ro",
-                "neander-starter-nextjs:local", *command,
+                os.environ.get("NEANDER_TEMPLATE_IMAGE", "reflect:ci"), *command,
             ], capture_output=True, text=True, timeout=30, check=True)
             self.assertEqual(result.stdout, value)
 

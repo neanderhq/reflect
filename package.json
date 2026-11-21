@@ -10,7 +10,11 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build && node .neander/prepare-standalone.mjs",
     "start": "node .next/standalone/server.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "tsx tests/runtime-guards.ts && tsx tests/email-template.ts && tsx tests/security-regressions.ts && tsx tests/workflows.ts && tsx tests/backup.ts",
+    "db:migrate": "node .neander/migrate.mjs",
+    "db:seed": "tsx scripts/seed-template.ts",
+    "test:template": "tsx scripts/verify-template.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
@@ -30,6 +34,7 @@
     "tailwind-merge": "3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@tailwindcss/postcss": "4.3.2",
     "@types/node": "24.13.3",
     "@types/pg": "8.23.1",

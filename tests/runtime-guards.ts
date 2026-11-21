@@ -18,6 +18,7 @@ async function main(){
   csrf(new NextRequest('https://example.com/api/auth/login',{headers:{origin:'https://example.com','x-lattice-request':'1'}}));
   assert.match(sessionResponse('test').headers.get('set-cookie')||'',/Secure/i);assert.equal(unseal(seal('test')),'test');
   for(const [key,length] of [['AUTH_TOKEN_KEY',23],['HR_SETUP_KEY',31],['SCHEDULER_SECRET',23]] as const){const old=process.env[key];process.env[key]='x'.repeat(length);assert.equal(runtimeReadiness()[key],false);process.env[key]=old;}
+  for (const origin of ['http://127.0.0.1:8080', 'http://localhost:3000']) { process.env.APP_ORIGIN = origin; assert.equal(runtimeReadiness().APP_ORIGIN, true); }
   for(const origin of ['http://example.com','https://example.com/path','https://user@example.com','']){process.env.APP_ORIGIN=origin;assert.equal(runtimeReadiness().APP_ORIGIN,false);}
   process.env.APP_ORIGIN='example.com/';process.env.AUTH_TOKEN_KEY='secret-too-short';const result=health();assert.equal(result.status,200);const payload=await result.json();assert.deepEqual(payload,{status:'ok',runtime:{APP_ORIGIN:true,AUTH_TOKEN_KEY:false,HR_SETUP_KEY:true,SCHEDULER_SECRET:true}});assert.ok(!JSON.stringify(payload).includes('secret-too-short'));
  }finally{process.env=saved;}
