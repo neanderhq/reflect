@@ -1,0 +1,34 @@
+contract_version: 1
+id: reflect
+title: Reflect
+description: |
+  **Run thoughtful performance reviews in one workspace.**
+
+  Reflect brings HR, managers and employees together for self, manager, upward and peer reviews. Plan review cycles, calibrate summaries, release results and follow through with development actions.
+
+  Explore a fictional team with an active review cycle and completed review history. Email delivery and unattended reminders use your own provider and scheduler configuration.
+category: People & HR
+best_for: People teams and managers running structured performance reviews
+features:
+  - Review cycles and versioned review templates
+  - Self, manager, upward and peer reviews
+  - Calibration and versioned result packets
+  - Employee acknowledgment and development actions
+  - Privacy-aware reports and CSV/PDF exports
+  - Role-scoped HR, manager and employee workspaces
+included:
+  - Performance review application
+  - PostgreSQL migrations
+  - Fictional team and sample review history
+  - Provider email and scheduler configuration guide
+thumbnail: .neander/thumbnail.png
+screenshots:
+  - .neander/screenshots/people.png
+  - .neander/screenshots/reviews.png
+commands:
+  install: [pnpm, install, --frozen-lockfile]
+  check: [pnpm, run, check]
+  test: [pnpm, run, test]
+  verify: [pnpm, run, test:template]
+seed:
+  command: [pnpm, run, db:seed]

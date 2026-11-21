@@ -5,7 +5,12 @@ export function appOrigin(value=process.env.APP_ORIGIN) {
 }
 export function runtimeReadiness() {
  return {
-  APP_ORIGIN:appOrigin()?.startsWith('https://')===true,
+  APP_ORIGIN: (() => {
+    const origin = appOrigin();
+    if (!origin) return false;
+    const url = new URL(origin);
+    return url.protocol === 'https:' || ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  })(),
   AUTH_TOKEN_KEY:(process.env.AUTH_TOKEN_KEY||'').length>=24,
   HR_SETUP_KEY:(process.env.HR_SETUP_KEY||'').length>=32,
   SCHEDULER_SECRET:(process.env.SCHEDULER_SECRET||'').length>=24,

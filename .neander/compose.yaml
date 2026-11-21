@@ -40,10 +40,17 @@ x-neander:
   - service: web
     name: HR_SETUP_KEY
     required: true
-    source: user
+    source: generated
     provider: null
+    generator: opaque-random
   - service: web
     name: SCHEDULER_SECRET
+    required: true
+    source: generated
+    provider: null
+    generator: opaque-random
+  - service: web
+    name: DEMO_PASSWORD
     required: true
     source: generated
     provider: null

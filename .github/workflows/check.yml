@@ -1,33 +1,59 @@
-name: Starter checks
+name: Reflect checks
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  production:
+  app:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
-      - name: Check deployment examples
-        run: |
-          python3 -m pip install PyYAML==6.0.3
-          python3 scripts/test_deployment_contract.py
-      - name: Build locked production image
-        run: docker build -f .neander/Dockerfile -t neander-starter-nextjs:local .
-      - name: Check literal environment handling
-        run: python3 scripts/test_entrypoint.py
-      - name: Check production HTTP routes
-        run: |
-          docker run --detach --name starter-check --publish 127.0.0.1:8080:8080 neander-starter-nextjs:local
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8080/api/health; then break; fi
-            sleep 1
-          done
-          python3 scripts/smoke.py http://127.0.0.1:8080
-      - name: Container logs and cleanup
-        if: always()
-        run: |
-          docker logs starter-check || true
-          docker rm --force starter-check || true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.3
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: pnpm build
+      - run: node tests/standalone-artifacts.mjs
+  production:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: reflect_test
+          POSTGRES_PASSWORD: reflect_test_only
+          POSTGRES_DB: reflect_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U reflect_test -d reflect_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://reflect_test:reflect_test_only@127.0.0.1:5432/reflect_test
+      NEANDER_TEMPLATE_TEST_DATABASE_URL: postgresql://reflect_test:reflect_test_only@127.0.0.1:5432/reflect_test
+      NEANDER_TEMPLATE_IMAGE: reflect:ci
+      APP_ORIGIN: http://127.0.0.1:8080
+      AUTH_TOKEN_KEY: reflect-ci-auth-token-key-32-characters
+      HR_SETUP_KEY: reflect-ci-setup-key-at-least-32-chars
+      SCHEDULER_SECRET: reflect-ci-scheduler-key-32-characters
+      DEMO_PASSWORD: Reflect-ci-demo-password!
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.3
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: docker build -f .neander/Dockerfile -t reflect:ci .
+      - run: python3 scripts/test_entrypoint.py
+      - run: pnpm db:migrate
+      - run: pnpm db:seed
+      - run: pnpm test:template
