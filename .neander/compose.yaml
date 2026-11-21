@@ -1,0 +1,75 @@
+# Complete deployment recipe for this block and its prerequisites.
+# Merge with an existing recipe; retain application-specific requirements.
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: .neander/Dockerfile
+    ports:
+    - 8080:8080
+    secrets:
+    - neander_environment
+    x-google-cloudrun:
+      ingress-container: true
+secrets:
+  neander_environment:
+    file: /run/neander/secrets/neander_environment
+x-neander:
+  ingress:
+    service: web
+    port: 8080
+    root_probe: /api/health
+  environment:
+  - service: web
+    name: DATABASE_URL
+    required: true
+    source: provisioned
+    provider: Neon
+  - service: web
+    name: APP_ORIGIN
+    required: true
+    source: provisioned
+    provider: Neander
+    binding: public_origin
+  - service: web
+    name: AUTH_TOKEN_KEY
+    required: true
+    source: generated
+    provider: null
+    generator: opaque-random
+  - service: web
+    name: HR_SETUP_KEY
+    required: true
+    source: user
+    provider: null
+  - service: web
+    name: SCHEDULER_SECRET
+    required: true
+    source: generated
+    provider: null
+    generator: opaque-random
+  - service: web
+    name: CRON_SECRET
+    required: false
+    source: user
+    provider: null
+  - service: web
+    name: EMAIL_PROVIDER
+    required: false
+    source: user
+    provider: null
+  - service: web
+    name: EMAIL_API_KEY
+    required: false
+    source: user
+    provider: null
+  - service: web
+    name: EMAIL_FROM
+    required: false
+    source: user
+    provider: null
+  probes:
+  - path: /api/health
+    success_status_range: 2xx
+  migration: nextjs-drizzle
+  # Server-side values; email remains disabled until an approved integration is verified.
