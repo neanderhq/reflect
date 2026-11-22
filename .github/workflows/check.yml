@@ -35,11 +35,12 @@ jobs:
         with:
           node-version: 24.22.3
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
-      - run: python3 -m pip install PyYAML==6.0.3
       - run: pnpm install --frozen-lockfile
-      - run: pnpm verify
+      - run: pnpm check
+      - run: pnpm test
         env:
           DATABASE_URL: postgresql://unused.invalid/fixture_isolation
+      - run: pnpm build
       - run: node tests/standalone-artifacts.mjs
   production:
     name: Runtime security
