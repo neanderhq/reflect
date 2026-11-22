@@ -80,3 +80,7 @@ See [verification scope](docs/status.md) for provider and hosted-environment lim
 ## License
 
 MIT. Existing third-party UI foundation notices are retained in [public/neander-foundation-LICENSE.txt](public/neander-foundation-LICENSE.txt).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting and the automated security checks.
