@@ -84,3 +84,10 @@ MIT. Existing third-party UI foundation notices are retained in [public/neander-
 ## Security
 
 See [SECURITY.md](SECURITY.md) for private vulnerability reporting and the automated security checks.
+
+## Contributing and checks
+
+Use the pinned tools in `mise.toml`. Run `pnpm verify` for source validation;
+see [development setup](docs/development.md) and [verification coverage](docs/testing.md)
+for production-image tests and CI. Work through a feature branch and PR; preserve
+the existing application, deployment recipe, fictional seeds and MIT license.
