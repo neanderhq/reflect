@@ -1,6 +1,5 @@
-allowBuilds:
-  esbuild: true
-
+# Dependency installation scripts are enabled for Neander project development.
+dangerouslyAllowAllBuilds: true
 # Patched transitive versions until upstream toolchains update their ranges.
 overrides:
   "esbuild@<0.24.3": "0.25.12"
