@@ -1,60 +1,106 @@
-name: Reflect checks
+name: Project checks
 on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install PyYAML==6.0.3
+      - run: python3 scripts/check_repository.py
   app:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.22.3
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - run: python3 -m pip install PyYAML==6.0.3
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm test
+      - run: pnpm verify
         env:
           DATABASE_URL: postgresql://unused.invalid/fixture_isolation
-      - run: pnpm build
       - run: node tests/standalone-artifacts.mjs
   production:
+    name: Runtime security
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: reflect_test
-          POSTGRES_PASSWORD: reflect_test_only
-          POSTGRES_DB: reflect_test
+          POSTGRES_USER: template
+          POSTGRES_PASSWORD: template_ci_only
+          POSTGRES_DB: template_check
         ports: ['5432:5432']
         options: >-
-          --health-cmd "pg_isready -U reflect_test -d reflect_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U template -d template_check"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     env:
-      DATABASE_URL: postgresql://reflect_test:reflect_test_only@127.0.0.1:5432/reflect_test
-      NEANDER_TEMPLATE_TEST_DATABASE_URL: postgresql://reflect_test:reflect_test_only@127.0.0.1:5432/reflect_test
-      NEANDER_TEMPLATE_IMAGE: reflect:ci
-      APP_ORIGIN: http://127.0.0.1:8080
-      AUTH_TOKEN_KEY: reflect-ci-auth-token-key-32-characters
-      HR_SETUP_KEY: reflect-ci-setup-key-at-least-32-chars
-      SCHEDULER_SECRET: reflect-ci-scheduler-key-32-characters
-      DEMO_PASSWORD: Reflect-ci-demo-password!
+      DATABASE_URL: "postgresql://template:template_ci_only@127.0.0.1:5432/template_check"
+      NEANDER_TEMPLATE_TEST_DATABASE_URL: "postgresql://template:template_ci_only@127.0.0.1:5432/template_check"
+      NEANDER_TEMPLATE_IMAGE: "reflect:security"
+      NEANDER_TEMPLATE_TEST_ORIGIN: "http://127.0.0.1:8080"
+      APP_ORIGIN: "http://127.0.0.1:8080"
+      AUTH_TOKEN_KEY: "template-ci-only-reflect-AUTH_TOKEN_KEY-32-characters"
+      HR_SETUP_KEY: "template-ci-only-reflect-HR_SETUP_KEY-32-characters"
+      SCHEDULER_SECRET: "template-ci-only-reflect-SCHEDULER_SECRET-32-characters"
+      DEMO_PASSWORD: "template-ci-only-reflect-DEMO_PASSWORD-32-characters"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.22.3
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - run: python3 -m pip install PyYAML==6.0.3
       - run: pnpm install --frozen-lockfile
-      - run: docker build -f .neander/Dockerfile -t reflect:ci .
+      - name: Build the production runtime
+        run: docker build --pull -f .neander/Dockerfile -t "$NEANDER_TEMPLATE_IMAGE" .
+      - name: Install checksum-verified Trivy
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz \
+            --output "$RUNNER_TEMP/trivy.tar.gz"
+          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  $RUNNER_TEMP/trivy.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy" trivy
+      - name: Scan the built runtime for vulnerabilities and secrets
+        run: >-
+          "$RUNNER_TEMP/trivy/trivy" image --image-src docker
+          --scanners vuln,secret --exit-code 1 --format json
+          --output "$RUNNER_TEMP/image-security.json" "$NEANDER_TEMPLATE_IMAGE"
       - run: python3 scripts/test_entrypoint.py
-      - run: pnpm db:migrate
-      - run: pnpm db:seed
-      - run: pnpm test:template
+      - run: node .neander/migrate.mjs
+      - run: pnpm run db:seed
+      - name: Verify the built application and seeded data
+        run: pnpm run test:production
+      - name: Upload runtime security report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: runtime-security
+          path: ${{ runner.temp }}/image-security.json
+          if-no-files-found: warn
+          retention-days: 7

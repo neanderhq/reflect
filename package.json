@@ -14,7 +14,10 @@
     "test": "tsx tests/runtime-guards.ts && tsx tests/email-template.ts && tsx tests/security-regressions.ts && tsx tests/workflows.ts && tsx tests/backup.ts",
     "db:migrate": "node .neander/migrate.mjs",
     "db:seed": "tsx scripts/seed-template.ts",
-    "test:template": "tsx scripts/verify-template.ts"
+    "test:template": "tsx scripts/verify-template.ts",
+    "test:policy": "python3 scripts/check_repository.py",
+    "verify": "pnpm run check && pnpm run test && pnpm run test:policy && pnpm run build",
+    "test:production": "tsx scripts/verify-template.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
