@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { safeRedirect } from '@/lib/safe-redirect';
 import { Layers3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,7 +21,7 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const target = params.get('next');
-    if (target && target.startsWith('/') && !target.startsWith('//') && !target.includes('\\')) setNext(target);
+    setNext(safeRedirect(target, location.origin));
     const token = params.get('token');
     const kind = params.get('kind');
     if (token && (kind === 'reset' || kind === 'invite')) {

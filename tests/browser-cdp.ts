@@ -9,7 +9,7 @@ export async function launch():Promise<Page> {
  const profile=await mkdtemp(join(tmpdir(),'lattice-cdp-'));
  const chrome:ChildProcess=spawn(chromePath,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--no-first-run','--no-default-browser-check','--disable-extensions','about:blank'],{stdio:'ignore'});
  let port='';for(let i=0;i<100&&!port;i++){try{port=(await readFile(join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0];}catch{await new Promise(r=>setTimeout(r,100));}}
- if(!port)throw new Error('CHROME_NOT_STARTED');
+ if(!/^\d{1,5}$/.test(port)||Number(port)<1||Number(port)>65535)throw new Error('CHROME_NOT_STARTED');
  const targets=await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as {type:string;webSocketDebuggerUrl:string}[];
  const socket=new WebSocket(targets.find(t=>t.type==='page')!.webSocketDebuggerUrl);await new Promise(r=>socket.addEventListener('open',r,{once:true}));
  let seq=0;const pending=new Map<number,{resolve:(v:any)=>void;reject:(e:Error)=>void}>();const listeners:((m:any)=>void)[]=[];

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import { safeRedirect } from '../lib/safe-redirect';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { getDb } from '../server/db';
 import { acquirePgliteLock, pgliteLockPath } from '../server/pglite-lock';
@@ -11,6 +12,9 @@ import { csrf, sessionResponse } from '../server/http';
 import { seal, unseal } from '../server/session';
 import { NextRequest } from 'next/server';
 async function main(){
+ for(const path of [null, '//attacker.test', '/\t/attacker.test', '/\n/attacker.test', '/\\attacker.test', 'https://attacker.test', 'javascript:alert(1)']) assert.equal(safeRedirect(path,'https://reflect.test'),'/');
+ assert.equal(safeRedirect('/?view=reviews#open','https://reflect.test'),'/?view=reviews#open');
+ assert.equal(safeRedirect('/cycles/../reviews?draft=1','https://reflect.test'),'/reviews?draft=1');
  const saved={...process.env};
  try{
   process.env.APP_ORIGIN='example.com/';process.env.AUTH_TOKEN_KEY='a'.repeat(24);process.env.HR_SETUP_KEY='h'.repeat(32);process.env.SCHEDULER_SECRET='s'.repeat(24);
@@ -36,7 +40,7 @@ async function main(){
  assert.equal(startup.status,0,startup.stderr);assert.match(startup.stderr,/lattice_scheduler_start skipped/);
  // One process owns a PGlite folder: while a holder runs, a second opener fails fast instead of corrupting data.
  mkdirSync('.test-data', { recursive: true });
- const dir=`.test-data/lock-guard-${process.pid}`,lock=pgliteLockPath(dir);rmSync(lock,{force:true});
+ const dir=mkdtempSync('.test-data/lock-guard-'),lock=pgliteLockPath(dir);
  const holder=spawn(process.execPath,['--import','tsx',process.argv[1],'hold',dir],{stdio:['pipe','pipe','inherit']});
  const [ready]=await once(holder.stdout!,'data');assert.equal(String(ready).trim(),'held');
  try{
@@ -45,7 +49,7 @@ async function main(){
  await once(holder,'exit');assert.ok(!existsSync(lock),'lock released when the owner exits');
  // A lock left by a process that no longer exists is stale and is reclaimed.
  const dead=spawnSync(process.execPath,['-e','process.exit(0)']).pid!;writeFileSync(lock,String(dead));
- acquirePgliteLock(dir);rmSync(lock,{force:true});
+ acquirePgliteLock(dir);rmSync(lock,{force:true});rmSync(dir,{recursive:true});
  console.log('PASS: isolated runtime processes reject production PGlite, missing production secrets, outside-worktree synthetic storage and unconfigured persistence; a second PGlite opener gets PGLITE_LOCKED and stale locks are reclaimed. No database connections attempted.');
 }
 if(process.argv[2]==='child'){
