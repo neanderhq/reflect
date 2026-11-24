@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect } from '@playwright/test';
 import { seedTemplate, DEMO_COMPANY } from './seed-template';
+import { verifyWorkspaceInteractions } from './verify-workspace-interactions';
 
 const exec = promisify(execFile);
 async function main() {
@@ -95,6 +96,8 @@ async function main() {
       await isolated.close();
     }
     console.log('PASS: production image, fictional data, HR UI, role-scoped access, retry-preserving seed and edit persistence after restart');
+    await verifyWorkspaceInteractions(browser, origin.origin, password);
+    console.log('PASS: report filter ordering, 375px directory and navigation, keyboard focus restoration, review validation and persisted draft submission');
   } finally {
     await browser?.close();
     try { await exec('docker', ['rm', '--force', name], { timeout: 30000 }); } finally { await rm(directory, { recursive: true, force: true }); }
