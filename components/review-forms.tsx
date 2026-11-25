@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -53,25 +53,64 @@ export function ReviewEditor({ assignment, locked, save }: {
 }) {
   const state = useSave();
   const [answers, setAnswers] = useState(assignment.answers);
-  return <form className="form-stack" method="post" onSubmit={event => {
+  const [invalidQuestions, setInvalidQuestions] = useState<string[]>([]);
+  const errorPrefix = useId();
+
+  function updateAnswer(id: string, value: string | number) {
+    setAnswers(current => ({ ...current, [id]: value }));
+    if (String(value).trim()) {
+      setInvalidQuestions(current => current.filter(questionId => questionId !== id));
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (locked || state.pending) return;
+    const missing = assignment.questions.filter(question =>
+      question.required && !String(answers[question.id] ?? '').trim(),
+    );
+    setInvalidQuestions(missing.map(question => question.id));
+    if (missing.length) {
+      const field = event.currentTarget.elements.namedItem(missing[0].id);
+      if (field instanceof HTMLElement) field.focus();
+      return;
+    }
     void state.run(() => save(answers, true));
-  }}>
+  }
+
+  return <form className="form-stack" method="post" onSubmit={submit}>
     {locked&&<p role="status">Editing is locked. Reviews must be within the cycle dates and open for submission. HR can reopen a submitted review.</p>}
-    {assignment.questions.map(question => <div className="form-field" key={question.id}>
-      <Label htmlFor={question.id}>{question.text} {question.required && '(required)'}</Label>
-      {question.kind === 'written'
-        ? <Textarea id={question.id} value={answers[question.id] ?? ''} rows={4} disabled={locked}
-          onChange={event => setAnswers({ ...answers, [question.id]: event.target.value })}/>
-        : <select id={question.id} className="native-select" disabled={locked} value={answers[question.id] ?? ''}
-          onChange={event => setAnswers({ ...answers, [question.id]: event.target.value ? Number(event.target.value) : '' })}>
+    {assignment.questions.map(question => {
+      const invalid = invalidQuestions.includes(question.id);
+      const errorId = `${errorPrefix}-${question.id}`;
+      const field = {
+        id: question.id,
+        disabled: locked,
+        value: answers[question.id] ?? '',
+        'aria-required': question.required || undefined,
+        'aria-invalid': invalid || undefined,
+        'aria-describedby': invalid ? errorId : undefined,
+      };
+      return <div className="form-field" key={question.id}>
+        <Label htmlFor={question.id}>{question.text} {question.required && '(required)'}</Label>
+        {question.kind === 'written'
+          ? <Textarea {...field} rows={4} onChange={event => updateAnswer(question.id, event.target.value)}/>
+          : <select {...field} className="native-select"
+            onChange={event => updateAnswer(question.id, event.target.value ? Number(event.target.value) : '')}>
           <option value="">Select a rating</option>
           {ratingScale.map(rating => <option value={rating} key={rating}>{rating} / 5</option>)}
-        </select>}
-    </div>)}
+          </select>}
+        {invalid && <p id={errorId} role="alert">
+          {question.kind === 'rating' ? 'Select a rating for this question.' : 'Enter an answer to this question.'}
+        </p>}
+      </div>;
+    })}
     <ErrorMessage text={state.error}/>
     {!locked && <div className="flex flex-wrap gap-2">
-      <Button type="button" variant="outline" disabled={state.pending} onClick={() => void state.run(() => save(answers, false))}>Save draft</Button>
+      <Button type="button" variant="outline" disabled={state.pending} onClick={() => {
+        setInvalidQuestions([]);
+        void state.run(() => save(answers, false));
+      }}>Save draft</Button>
       <Button type="submit" disabled={state.pending}>Submit review</Button>
     </div>}
   </form>;
