@@ -1,2 +1,2 @@
-# Technical ownership and maintainer review.
-* @sourabhagrawal
+# Clone repositories intentionally have no automatic review assignments.
+# Keep required CI and pull-request protections; do not add owner rules here.
