@@ -240,7 +240,7 @@ export default function Workspace(){
        request=>`${request.colleague} ${request.question} ${request.status}`);
      if(!rows.length)return <Empty>{linkedAdvice?'This request is unavailable.':search?'No matching advice requests.':'Your requests and replies will appear here.'}</Empty>;
      return <>
-       <AdviceList requests={listSlice(rows)} dateLabel={format} onReply={replyToAdvice} onResolve={resolveAdviceRequest}/>
+       <AdviceList requests={listSlice(rows)} linked={!!linkedAdvice} dateLabel={format} onReply={replyToAdvice} onResolve={resolveAdviceRequest}/>
        <Pager length={rows.length} page={page} setPage={setPage}/>
      </>;
    })()}

@@ -14,8 +14,9 @@ const states = {
   declined: { label: 'Declined', tone: 'muted' },
 };
 
-export function AdviceList({ requests, onReply, onResolve, dateLabel }: {
+export function AdviceList({ requests, onReply, onResolve, dateLabel, linked }: {
   requests: Advice[];
+  linked: boolean;
   onReply: (request: Advice) => void;
   onResolve: (request: Advice, action: 'cancel' | 'decline') => void;
   dateLabel: (date: string) => string;
@@ -25,7 +26,12 @@ export function AdviceList({ requests, onReply, onResolve, dateLabel }: {
     return <Card key={request.id}>
       <CardHeader className="section-heading">
         <div className="min-w-0 break-words">
-          <CardTitle>{request.incoming ? 'From' : 'To'} {request.colleague}</CardTitle>
+          <CardTitle>{linked
+            ? <>{request.incoming ? 'From' : 'To'} {request.colleague}</>
+            : <a className="text-primary underline-offset-4 hover:underline" href={`/?view=advice&request=${encodeURIComponent(request.id)}`}
+              aria-label={`Open request ${request.incoming ? 'from' : 'to'} ${request.colleague}: ${request.question.length > 120 ? request.question.slice(0, 119) + '…' : request.question}`}>
+              {request.incoming ? 'From' : 'To'} {request.colleague}
+            </a>}</CardTitle>
           <CardDescription>{dateLabel(request.createdAt)}</CardDescription>
         </div>
         <Badge variant="outline" className={`status-badge tone-${tone}`}>{label}</Badge>

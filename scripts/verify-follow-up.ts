@@ -34,10 +34,11 @@ async function tabTo(page: Page, target: Locator) {
 
 export async function verifyFollowUp(browser: Browser, origin: string, password: string, capture?: string) {
   const alex = await browser.newPage(phone);
-  const blair = await browser.newPage(desktop);
+  const blair = await browser.newPage(phone);
+  const blairDesktop = await browser.newPage(desktop);
   const hr = await browser.newPage(phone);
   const hrDesktop = await browser.newPage(desktop);
-  for (const page of [alex, blair, hr, hrDesktop]) page.setDefaultTimeout(15000);
+  for (const page of [alex, blair, hr, hrDesktop, blairDesktop]) page.setDefaultTimeout(15000);
   const api = async (page: Page, command: string, values: Record<string, unknown>) => {
     const response = await page.request.post(origin + '/api/workspace', {
       headers: { origin, 'X-Lattice-Request': '1' }, data: { command, ...values },
@@ -45,8 +46,8 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     assert.equal(response.status(), 200, await response.text());
     return response.json();
   };
-  const shot = async (page: Page, name: string) => {
-    if (capture) await page.screenshot({ path: join(capture, 'screenshots', name + '.png') });
+  const shot = async (page: Page, name: string, fullPage = false) => {
+    if (capture) await page.screenshot({ path: join(capture, 'screenshots', name + '.png'), fullPage });
   };
 
   try {
@@ -78,7 +79,7 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     await expect(alex.getByRole('heading', { name: 'Development actions', exact: true })).toBeFocused();
     await expect(alex.getByText('Lead clearer check-ins', { exact: true })).toBeVisible();
     await fitPhone(alex);
-    await shot(alex, 'phone-development-goal');
+    await shot(alex, 'phone-development-goal', true);
     await alex.reload();
     const update = alex.getByRole('button', { name: /Update development action.*Prepare an agenda/ });
     await keyboardOpen(alex, update);
@@ -137,6 +138,7 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     const stale = queue.getByRole('alert');
     await expect(stale).toContainText('No packets were released in this batch.');
     await expect(stale).toBeFocused();
+    await shot(hr, 'phone-closeout-stale');
     const refresh = queue.getByRole('button', { name: 'Refresh queue' });
     await tabTo(hr, refresh);
     await hr.keyboard.press('Enter');
@@ -162,6 +164,7 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     await expect(blair.getByText(/Immutable version 1/)).toBeVisible();
     await blair.getByRole('button', { name: 'Acknowledge this version' }).click();
     await expect(blair.getByText('Acknowledged', { exact: true })).toBeVisible();
+    await hrDesktop.reload();
     await openView(hrDesktop, 'Cycles', 'Review cycles');
     await hrDesktop.getByRole('button', { name: `Cycle closeout — ${spring}` }).click();
     const desktopQueue = hrDesktop.getByRole('dialog', { name: `Cycle closeout · ${spring}` });
@@ -170,6 +173,10 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     await hrDesktop.keyboard.press('Escape');
     await openView(blair, 'Cycles', 'Review cycles');
     await expect(blair.getByRole('button', { name: /Cycle closeout/ })).toHaveCount(0);
+    await api(hrDesktop, 'cycle.status', { id: 'spring-history', revision: 0, status: 'closed', reason: 'Finish fictional cycle' });
+    await hrDesktop.getByRole('button', { name: `Cycle closeout — ${spring}` }).click();
+    await expect(desktopQueue.getByText('The cycle is closed. Participants can acknowledge results once it is reopened.')).toBeVisible();
+    await hrDesktop.keyboard.press('Escape');
     console.log('PASS: HR-only readiness, keyboard first release, stale-batch recovery and employee acknowledgment');
 
     await openView(alex, /^Advice/, 'Private advice');
@@ -207,10 +214,15 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     await expect(inbox).toHaveAccessibleName(/1 request awaiting your reply/);
     await openView(blair, /^Advice/, 'Private advice');
     await expect(blair.getByText(question, { exact: true })).toBeVisible();
-    await shot(blair, 'desktop-advice-pending');
+    await signIn(blairDesktop, origin, 'blair@reflect.test', password);
+    await openView(blairDesktop, /^Advice/, 'Private advice');
+    await expect(blairDesktop.getByText(question, { exact: true })).toBeVisible();
+    await shot(blairDesktop, 'desktop-advice-pending');
     await keyboardOpen(blair, blair.getByRole('button', { name: 'Reply', exact: true }));
     const response = blair.getByRole('dialog', { name: 'Reply to Alex Chen' });
     await expect(response.getByLabel('Your advice')).toBeFocused();
+    await fitPhone(blair, response);
+    await shot(blair, 'phone-advice-reply');
     await blair.keyboard.type(reply);
     await blair.keyboard.press('Tab');
     await expect(response.getByRole('button', { name: 'Send reply' })).toBeFocused();
@@ -224,9 +236,16 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     await shot(alex, 'phone-advice-answered');
 
     await send('An example request I will cancel.');
+    const canceledLink = alex.getByRole('link', { name: /open request to Blair Patel: An example request I will cancel/i });
+    await keyboardOpen(alex, canceledLink);
+    await expect(alex.getByRole('button', { name: 'Show all requests' })).toBeVisible();
     await alex.getByRole('button', { name: 'Cancel request' }).click();
     await alex.getByRole('button', { name: 'Confirm cancellation' }).click();
     await expect(alex.getByText('Canceled', { exact: true })).toBeVisible();
+    await alex.reload();
+    await expect(alex.getByText('Canceled', { exact: true })).toBeVisible();
+    await expect(alex.getByRole('button', { name: 'Cancel request' })).toHaveCount(0);
+    await alex.getByRole('button', { name: 'Show all requests' }).click();
     await send('An example request you can decline.');
     await blair.reload();
     await blair.getByRole('button', { name: 'Decline', exact: true }).click();
@@ -244,6 +263,6 @@ export async function verifyFollowUp(browser: Browser, origin: string, password:
     assert.ok(!body.includes(question) && !body.includes(reply) && !body.includes('adviceRequests'));
     console.log('PASS: phone compose recovery, participant inbox/reply, durable cancellation and decline, private deep link and backup exclusion');
   } finally {
-    await Promise.all([alex.close(), blair.close(), hr.close(), hrDesktop.close()]);
+    await Promise.all([alex.close(), blair.close(), hr.close(), hrDesktop.close(), blairDesktop.close()]);
   }
 }

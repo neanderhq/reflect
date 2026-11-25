@@ -102,8 +102,9 @@ test('goals link a released version, persist with actions and follow current man
 test('closeout first releases are HR-only, revision-bound and all-or-nothing', async () => {
   await fixture(async db => {
     const cycleId = 'spring-history';
-    const queue = (personId = 'hr', id = cycleId) =>
-      command<ReturnType<typeof import('../server/closeout').closeoutRows>>(personId, 'cycle.closeout', { cycleId: id });
+    const closeout = (personId = 'hr', id = cycleId) =>
+      command<{ status: string; rows: ReturnType<typeof import('../server/closeout').closeoutRows> }>(personId, 'cycle.closeout', { cycleId: id });
+    const queue = async (personId = 'hr', id = cycleId) => (await closeout(personId, id)).rows;
     const summary = (subjectId: string) => command<{ id: string; revision: number }>('hr', 'summary', {
       cycleId, subjectId, text: 'Consistent work on fictional projects.', revision: 0, rating: 3,
     });
@@ -159,6 +160,7 @@ test('closeout first releases are HR-only, revision-bound and all-or-nothing', a
     await command('blair', 'acknowledge', { id: version2.id });
     assert.equal((await queue()).find(row => row.subjectId === 'blair')?.status, 'acknowledged');
     await command('hr', 'cycle.status', { id: cycleId, revision: 0, status: 'closed', reason: 'Close after releases' });
+    assert.equal((await closeout()).status, 'closed');
     await assert.rejects(command('casey', 'acknowledge', { id: after.packets.find(p => p.subjectId === 'casey')!.id }), /CYCLE_LOCKED/);
   });
 });

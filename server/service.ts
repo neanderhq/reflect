@@ -180,7 +180,11 @@ export async function operation(actor:Actor,command:string,input:Record<string,u
  case 'release': {hr(p);const c=cycle(s,id(input.cycleId));open(c);requireThat(Date.now()>=Date.parse(c.releaseDate),'RELEASE_NOT_DUE',409);const subjectId=id(input.subjectId);const x=s.summaries.find(x=>x.cycleId===c.id&&x.subjectId===subjectId);requireThat(x,'SUMMARY_REQUIRED');rev(x,input.revision);requireThat(!s.assignments.some(a=>a.cycleId===c.id&&a.subjectId===subjectId&&a.status!=='submitted'),'REVIEWS_INCOMPLETE',409);
  const old=s.packets.filter(k=>k.cycleId===c.id&&k.subjectId===subjectId);requireThat(input.expectedVersion===old.length,'PACKET_VERSION_CONFLICT',409);
  result=publishPacket(s,p,c,x,old.length+1);break;}
- case 'cycle.closeout': {hr(p);return closeoutRows(s,cycle(s,id(input.cycleId)),Date.now());}
+ case 'cycle.closeout': {
+  hr(p);
+  const c=cycle(s,id(input.cycleId));
+  return { status:c.status, rows:closeoutRows(s,c,Date.now()) };
+ }
  case 'release.batch': {hr(p);result=publishReadyPackets(s,p,cycle(s,id(input.cycleId)),input.selection);break;}
  case 'acknowledge': {const packet=s.packets.find(x=>x.id===input.id&&x.subjectId===p.id);requireThat(packet,'NOT_FOUND',404);open(cycle(s,packet.cycleId));if(!s.acknowledgments.some(x=>x.packetId===packet.id)){s.acknowledgments.push({id:uid(),packetId:packet.id,subjectId:p.id,at:now()});audit(s,p,'packet.acknowledged',packet.id);}break;}
  case 'people.preview':case 'people.apply': {hr(p);const {errors,next}=validatePeople(s,parsePeople(input.csv));if(command==='people.preview')return {errors,directoryVersion:directoryVersion(s),rows:next.map(({passwordHash,authVersion,...r})=>r)};requireThat(input.directoryVersion===directoryVersion(s),'REVISION_CONFLICT',409);requireThat(!errors.length,'CSV_VALIDATION_FAILED',422);for(const person of next){const old=s.people.find(p=>p.id===person.id);if(old&&JSON.stringify(old)!==JSON.stringify(person)){person.authVersion++;person.revision=(old.revision||0)+1;audit(s,p,'person.access_changed',person.id);}}

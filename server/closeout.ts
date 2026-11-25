@@ -41,7 +41,10 @@ export function closeoutRows(state: State, cycle: Cycle, now: number): Row[] {
     const reviews = assignments.get(subjectId) ?? [];
     if (reviews.some(assignment => assignment.status !== 'submitted')) return block('reviews_incomplete');
 
-    const versions = reviews.map(assignment => [assignment.id, assignment.revision] as const)
+    const versions = reviews.map(assignment => [
+      assignment.id, assignment.revision,
+      cycle.policy[assignment.type].disclose ? people.get(assignment.authorId)?.name : null,
+    ] as const)
       .sort(([a], [b]) => a.localeCompare(b));
     const token = createHash('sha256').update(JSON.stringify([
       cycle.id, cycle.revision, subjectId, person.authVersion, summary.id, summary.revision, versions,

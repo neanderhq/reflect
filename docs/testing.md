@@ -18,7 +18,7 @@ TypeScript is the existing static gate; this migration does not introduce a new 
 
 ## Production smoke coverage
 
-HR browser workflows, role-scoped access, fictional data, seed preservation and edit persistence after restart. Source tests also cover runtime guards, email, security regressions, workflows and backups.
+HR browser workflows, role-scoped access, fictional data, seed preservation and edit persistence after restart. Browser coverage includes packet-linked goals, stale HR batch recovery and private advice, with keyboard checks and a 375-pixel viewport. Source tests also cover runtime guards, email, security regressions, workflows and backups.
 
 CI supplies only fictional credentials and an isolated local PostgreSQL service.
 `DATABASE_URL` and `NEANDER_TEMPLATE_TEST_DATABASE_URL` must identify the same

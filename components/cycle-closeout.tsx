@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import type { closeoutRows } from '@/server/closeout';
 
 type Row = ReturnType<typeof closeoutRows>[number];
+type Queue = { status: 'open' | 'closed' | 'archived'; rows: Row[] };
 type Selection = Pick<Extract<Row, { status: 'ready' }>, 'subjectId' | 'token'>;
 const reasons = {
   inactive: 'Participant is inactive',
@@ -24,10 +25,11 @@ const labels = {
 const order = ['ready', 'blocked', 'released', 'acknowledged'];
 
 export function CycleCloseout({ load, release }: {
-  load: () => Promise<Row[]>;
+  load: () => Promise<Queue>;
   release: (selection: Selection[]) => Promise<void>;
 }) {
-  const [rows, setRows] = useState<Row[]>();
+  const [queue, setQueue] = useState<Queue>();
+  const rows = queue?.rows;
   const [selected, setSelected] = useState<string[]>([]);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -41,7 +43,7 @@ export function CycleCloseout({ load, release }: {
 
   useEffect(() => {
     let active = true;
-    load().then(result => { if (active) setRows(result); })
+    load().then(result => { if (active) setQueue(result); })
       .catch(() => { if (active) setError('Could not load the closeout queue. Try again.'); })
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
@@ -65,7 +67,7 @@ export function CycleCloseout({ load, release }: {
     setError('');
     setNotice('');
     try {
-      setRows(await load());
+      setQueue(await load());
       setNeedsRefresh(false);
       setSelected([]);
       setNotice('Queue refreshed. Review the current status before selecting participants.');
@@ -85,7 +87,7 @@ export function CycleCloseout({ load, release }: {
       setConfirm(false);
       setNotice(`Released ${ready.length} ${ready.length === 1 ? 'packet' : 'packets'}. The cycle stays open.`);
       try {
-        setRows(await load());
+        setQueue(await load());
       } catch {
         setNeedsRefresh(true);
       }
@@ -105,6 +107,9 @@ export function CycleCloseout({ load, release }: {
     {error && <Alert ref={message} tabIndex={-1} variant="destructive" role="alert"><AlertDescription>{error}</AlertDescription></Alert>}
     {notice && <div className="text-sm text-muted-foreground" role="status" ref={message} tabIndex={-1}>{notice}</div>}
     {busy && !rows && <p role="status">Loading closeout queue…</p>}
+    {queue && queue.status !== 'open' && <p className="text-sm text-muted-foreground">
+      The cycle is {queue.status}. Participants can acknowledge results once it is reopened.
+    </p>}
     {confirm ? <div className="space-y-4">
       <h3 className="font-semibold" ref={confirmation} tabIndex={-1}>Confirm first release</h3>
       <p className="text-sm text-muted-foreground">Each person will receive version 1 of their results. The cycle stays open so they can acknowledge.</p>
