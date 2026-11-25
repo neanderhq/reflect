@@ -15,6 +15,13 @@
       "when": 1794781663433,
       "tag": "0001_black_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795602295873,
+      "tag": "0002_development_goals",
+      "breakpoints": true
     }
   ]
 }

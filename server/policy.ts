@@ -25,6 +25,9 @@ export function packetProjection(s:State,p:Person,packet:Packet):Packet|null {
   return {...packet,feedback:packet.feedback.filter(f=>c.policy[f.type].include).map(f=>{const {authorName,...anonymous}=f;return c.policy[f.type].disclose?f:anonymous;})};
 }
 export function actionAllowed(s:State,p:Person,subjectId:string) { return p.id===subjectId || p.role==='hr_admin' || (p.role==='manager' && s.people.some(x=>x.id===subjectId && x.managerId===p.id)); }
+export function goalWritable(s:State,p:Person,subjectId:string) {
+ return p.role!=='hr_admin' && actionAllowed(s,p,subjectId) && s.people.some(x=>x.id===subjectId&&x.active);
+}
 export function eligibleOwners(s:State,p:Person,subjectId:string) {
  if(!actionAllowed(s,p,subjectId))return [];
  const subject=s.people.find(x=>x.id===subjectId);
@@ -40,6 +43,12 @@ export function workspace(s:State,p:Person) {
   ];
   const nominations=s.nominations.filter(n=>n.subjectId===p.id||canManage(s,p,cycle(s,n.cycleId),n.subjectId));
   const actions=s.actions.filter(a=>actionAllowed(s,p,a.subjectId));
+  const packets=s.packets.map(x=>packetProjection(s,p,x)).filter(packet=>packet!==null);
+  const goals=s.goals.filter(g=>actionAllowed(s,p,g.subjectId)).map(({packetId,...goal})=>{
+    const packet=packets.find(x=>x.id===packetId);
+    return {...goal, canEdit:goalWritable(s,p,goal.subjectId),
+      source:packet?{id:packet.id,cycleId:packet.cycleId,version:packet.version}:null};
+  });
   const namedIds=new Set([
     ...s.assignments.filter(a=>a.authorId===p.id).map(a=>a.subjectId),
     ...nominations.map(n=>n.authorId),...actions.flatMap(a=>[a.ownerId,a.subjectId]),
@@ -59,8 +68,9 @@ export function workspace(s:State,p:Person) {
     feedback:s.cycles.flatMap(c=>c.roster.filter(r=>canManage(s,p,c,r.id)).map(r=>({cycleId:c.id,subjectId:r.id,feedback:feedbackProjection(s,c,r.id)}))),
     submittedFeedback:p.role==='hr_admin'?s.assignments.filter(a=>a.status==='submitted').map(a=>({...a,authorName:s.people.find(x=>x.id===a.authorId)?.name})):[],
     summaries:s.summaries.filter(x=>canManage(s,p,cycle(s,x.cycleId),x.subjectId)),
-    packets:s.packets.map(x=>packetProjection(s,p,x)).filter(packet=>packet!==null),
+    packets,
     acknowledgments:s.acknowledgments.filter(a=>a.subjectId===p.id||s.packets.some(k=>k.id===a.packetId&&canManage(s,p,cycle(s,k.cycleId),k.subjectId))),
+    goals,
     actions,
     actionChoices:s.people.filter(x=>x.active&&actionAllowed(s,p,x.id)).map(x=>({subjectId:x.id,name:x.name,owners:eligibleOwners(s,p,x.id)})),
     outbox:p.role==='hr_admin'?s.notices.map(({id,recipientId,kind,status,attempts,diagnostic,nextAttempt})=>({id,recipientId,kind,status,attempts,diagnostic:(status==='pending'||status==='disabled')&&!mailConfigured()?notConfigured:diagnostic,nextAttempt})):[],

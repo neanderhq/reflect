@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { parse } from 'csv-parse/sync';
-import { Actor, State, Person, Cycle, Assignment, Template, ReviewType, reviewTypes, requireThat, text, id, email, AppError, Snapshot } from './model';
+import { Actor, State, Person, Cycle, Assignment, Template, ReviewType, DevelopmentAction, DevelopmentGoal, reviewTypes, requireThat, text, id, email, AppError, Snapshot } from './model';
 import { transaction, Database } from './db';
-import { member, hr, cycle, canManage, actionAllowed, feedbackProjection, workspace, eligibleOwners } from './policy';
+import { member, hr, cycle, canManage, actionAllowed, feedbackProjection, workspace, eligibleOwners, goalWritable, packetProjection } from './policy';
 import { checkSessionInTransaction } from './session';
 const uid=()=>randomUUID(); const now=()=>new Date(Date.now()).toISOString();
 const roles=['hr_admin','manager','employee'];
@@ -21,7 +21,14 @@ export const directoryVersion=(s:State)=>createHash('sha256').update(JSON.string
 function phase(c:Cycle,end:string) {open(c);requireThat(Date.now()>=Date.parse(c.start),'PHASE_NOT_STARTED',409);requireThat(Date.now()<=Date.parse(end),'PHASE_DEADLINE_PASSED',409);}
 function rev(entity:{revision:number},value:unknown) {requireThat(Number.isInteger(value)&&value===entity.revision,'REVISION_CONFLICT',409);}
 function open(c:Cycle) {requireThat(c.status==='open','CYCLE_LOCKED',409);}
-function date(v:unknown) { const d=text(v,40);requireThat(/^\d{4}-\d{2}-\d{2}(T.*)?$/.test(d)&&Number.isFinite(Date.parse(d)),'INVALID_DATE');return new Date(d).toISOString(); }
+function date(v:unknown) {
+ const d=text(v,40);
+ const day=d.slice(0,10);
+ const midnight=Date.parse(day);
+ requireThat(/^\d{4}-\d{2}-\d{2}(T.*)?$/.test(d) && Number.isFinite(Date.parse(d)) &&
+   Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0,10)===day,'INVALID_DATE');
+ return new Date(d).toISOString();
+}
 function rating(v:unknown) {requireThat(Number.isInteger(v)&&Number(v)>=1&&Number(v)<=5,'INVALID_RATING');return Number(v);}
 export function generate(s:State,p:Person,c:Cycle) {
  const add=(type:ReviewType,authorId:string,subjectId:string)=>{
@@ -60,6 +67,63 @@ export function parsePeople(csv:unknown) {
  const expected=['email','full_name','team','title','manager_email','role','active'];const headers=records[0]; requireThat(headers.length===7&&new Set(headers).size===7&&headers.every(h=>expected.includes(h)),'INVALID_HEADERS');
  return records.slice(1).map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]])));
 }
+function actionFields(s:State,p:Person,subjectId:string,input:Record<string,unknown>) {
+ const ownerId=id(input.ownerId);
+ requireThat(eligibleOwners(s,p,subjectId).some(x=>x.id===ownerId),'INVALID_OWNER');
+ const progress=text(input.progress) as DevelopmentAction['progress'];
+ requireThat(['planned','in_progress','complete'].includes(progress));
+ const title=text(input.title,200);
+ requireThat(title);
+ return {subjectId,ownerId,title,notes:text(input.notes,10000),due:date(input.due),progress};
+}
+function saveGoal(s:State,p:Person,input:Record<string,unknown>) {
+ const title=text(input.title,200),successMeasure=text(input.successMeasure,2000);
+ requireThat(title && successMeasure,'GOAL_FIELDS_REQUIRED');
+ if(input.id!==undefined) {
+  const goalId=id(input.id);
+  const goal=s.goals.find(g=>g.id===goalId);
+  requireThat(goal && actionAllowed(s,p,goal.subjectId),'NOT_FOUND',404);
+  requireThat(goalWritable(s,p,goal.subjectId),'FORBIDDEN',403);
+  rev(goal,input.revision);
+  Object.assign(goal,{title,successMeasure,revision:goal.revision+1});
+  audit(s,p,'goal.saved',goal.id);
+  return {id:goal.id};
+ }
+ const packetId=id(input.packetId);
+ const packet=s.packets.find(x=>x.id===packetId);
+ requireThat(packet && packetProjection(s,p,packet),'NOT_FOUND',404);
+ requireThat(goalWritable(s,p,packet.subjectId),'FORBIDDEN',403);
+ requireThat(!s.goals.some(g=>g.packetId===packet.id),'GOAL_EXISTS',409);
+ const goal:DevelopmentGoal={id:uid(),subjectId:packet.subjectId,packetId:packet.id,title,successMeasure,revision:0};
+ requireThat(text(input.actionTitle,200),'ACTION_TITLE_REQUIRED');
+ const fields=actionFields(s,p,goal.subjectId,{ownerId:input.ownerId,title:input.actionTitle,due:input.due,notes:'',progress:'planned'});
+ s.goals.push(goal);
+ const action:DevelopmentAction={id:uid(),goalId:goal.id,...fields,revision:0};
+ s.actions.push(action);
+ audit(s,p,'goal.saved',goal.id);
+ audit(s,p,'action.saved',action.id);
+ return {id:goal.id};
+}
+function saveAction(s:State,p:Person,input:Record<string,unknown>) {
+ const subjectId=id(input.subjectId);
+ requireThat(s.people.some(x=>x.id===subjectId)&&actionAllowed(s,p,subjectId),'FORBIDDEN',403);
+ const existing=input.id?s.actions.find(x=>x.id===input.id):undefined;
+ if(input.id)requireThat(existing,'NOT_FOUND',404);
+ if(existing) {
+  requireThat(existing.subjectId===subjectId,'FORBIDDEN',403);
+  rev(existing,input.revision);
+ }
+ const goalId=existing?existing.goalId:input.goalId===undefined?undefined:id(input.goalId);
+ if(goalId) {
+  requireThat(s.goals.some(g=>g.id===goalId&&g.subjectId===subjectId),'NOT_FOUND',404);
+  requireThat(goalWritable(s,p,subjectId),'FORBIDDEN',403);
+ }
+ const fields=actionFields(s,p,subjectId,input);
+ const action=existing??{id:uid(),...(goalId?{goalId}:{}),...fields,revision:0};
+ if(existing)Object.assign(existing,{...fields,revision:existing.revision+1});
+ else s.actions.push(action);
+ audit(s,p,'action.saved',action.id);
+}
 export async function operation(actor:Actor,command:string,input:Record<string,unknown>) {
  return transaction(actor.companyId,async(s,db)=>{await checkSessionInTransaction(actor,db,s); const p=member(s,actor.personId);let result:unknown={ok:true};
  switch(command) {
@@ -94,7 +158,8 @@ export async function operation(actor:Actor,command:string,input:Record<string,u
  case 'people.preview':case 'people.apply': {hr(p);const {errors,next}=validatePeople(s,parsePeople(input.csv));if(command==='people.preview')return {errors,directoryVersion:directoryVersion(s),rows:next.map(({passwordHash,authVersion,...r})=>r)};requireThat(input.directoryVersion===directoryVersion(s),'REVISION_CONFLICT',409);requireThat(!errors.length,'CSV_VALIDATION_FAILED',422);for(const person of next){const old=s.people.find(p=>p.id===person.id);if(old&&JSON.stringify(old)!==JSON.stringify(person)){person.authVersion++;person.revision=(old.revision||0)+1;audit(s,p,'person.access_changed',person.id);}}
  s.people=next;stale(s);audit(s,p,'people.imported',p.id);break;}
  case 'person.update': {hr(p);const person=s.people.find(x=>x.id===input.id);requireThat(person,'NOT_FOUND',404);rev({revision:person.revision||0},input.revision);const rows=[{email:person.email,full_name:text(input.name,120),team:text(input.team,100),title:text(input.title,120),manager_email:input.managerId?s.people.find(x=>x.id===input.managerId)?.email||'invalid':'',role:text(input.role),active:String(input.active)}];requireThat(typeof input.active==='boolean');const {errors,next}=validatePeople(s,rows);requireThat(!errors.length,'PEOPLE_VALIDATION_FAILED',422);const updated=next.find(x=>x.id===person.id)!;updated.authVersion++;updated.revision=(person.revision||0)+1;s.people=next;stale(s);audit(s,p,'person.access_changed',person.id);break;}
- case 'action': {const subjectId=id(input.subjectId);requireThat(s.people.some(x=>x.id===subjectId)&&actionAllowed(s,p,subjectId),'FORBIDDEN',403);const ownerId=id(input.ownerId);requireThat(eligibleOwners(s,p,subjectId).some(x=>x.id===ownerId),'INVALID_OWNER');const progress=text(input.progress);requireThat(['planned','in_progress','complete'].includes(progress));let a=input.id?s.actions.find(x=>x.id===input.id):undefined;if(input.id)requireThat(a,'NOT_FOUND',404);if(a){requireThat(a.subjectId===subjectId,'FORBIDDEN',403);rev(a,input.revision);}const fields={subjectId,ownerId,title:text(input.title,200),notes:text(input.notes,10000),due:date(input.due),progress:progress as 'planned'|'in_progress'|'complete'};requireThat(fields.title);if(a){Object.assign(a,fields);a.revision++;}else {a={id:uid(),...fields,revision:0};s.actions.push(a);}audit(s,p,'action.saved',a.id);break;}
+ case 'goal.save': result=saveGoal(s,p,input);break;
+ case 'action': saveAction(s,p,input);break;
  case 'outbox.retry': {hr(p);const n=s.notices.find(n=>n.id===input.id);requireThat(n,'NOT_FOUND',404);stale(s);requireThat(n.status==='disabled'||(n.status==='failed'&&n.diagnostic==='DELIVERY_REJECTED'&&n.attempts<5),'RETRY_NOT_SAFE',409);n.status='pending';n.nextAttempt=now();audit(s,p,'outbox.retry',n.id);break;}
  case 'notice.read': {const n=s.notices.find(n=>n.id===input.id&&n.recipientId===p.id);requireThat(n,'NOT_FOUND',404);n.read=true;break;}
  case 'reminders': {hr(p);for(const a of s.assignments){const c=cycle(s,a.cycleId);if(c.status==='open'&&Date.now()>=Date.parse(c.start)&&a.status==='draft'&&Date.parse(c.reviewDue)>=Date.now()&&Date.parse(c.reviewDue)-Date.now()<7*86400000)enqueue(s,a.authorId,'reminder',`reminder:${a.id}:${c.reviewDue}`,`/?view=reviews&review=${encodeURIComponent(a.id)}`,{cycleId:c.id,assignmentId:a.id,due:c.reviewDue});}stale(s);audit(s,p,'reminders.queued',p.id);break;}
