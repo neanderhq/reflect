@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, expect } from '@playwright/test';
 import { seedTemplate, DEMO_COMPANY } from './seed-template';
 import { verifyWorkspaceInteractions } from './verify-workspace-interactions';
+import { verifyFollowUp } from './verify-follow-up';
 
 const exec = promisify(execFile);
 async function main() {
@@ -97,6 +98,7 @@ async function main() {
     }
     console.log('PASS: production image, fictional data, HR UI, role-scoped access, retry-preserving seed and edit persistence after restart');
     await verifyWorkspaceInteractions(browser, origin.origin, password);
+    await verifyFollowUp(browser, origin.origin, password, capture);
     console.log('PASS: report filter ordering, 375px directory and navigation, keyboard focus restoration, review validation and persisted draft submission');
   } finally {
     await browser?.close();

@@ -1,7 +1,7 @@
 import { expect, type Browser, type Page } from '@playwright/test';
 import { DEMO_COMPANY } from './seed-template';
 
-async function signIn(page: Page, origin: string, email: string, password: string) {
+export async function signIn(page: Page, origin: string, email: string, password: string) {
   await page.goto(origin + '/login');
   await page.getByLabel('Workspace ID').fill(DEMO_COMPANY);
   await page.getByLabel('Email', { exact: true }).fill(email);
@@ -10,7 +10,7 @@ async function signIn(page: Page, origin: string, email: string, password: strin
   await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
 }
 
-async function openView(page: Page, label: string | RegExp, heading: string) {
+export async function openView(page: Page, label: string | RegExp, heading: string) {
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: label }).click();
   await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
 }
