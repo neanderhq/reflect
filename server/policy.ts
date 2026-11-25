@@ -1,3 +1,4 @@
+import { adviceFor } from './advice';
 import { mailConfigured, notConfigured } from './mail-config';
 import { Assignment, Cycle, Feedback, Packet, Person, State, requireThat } from './model';
 export function member(s:State, personId:string) { const p=s.people.find(p=>p.id===personId && p.active); requireThat(p,'SESSION_REVOKED',401); return p; }
@@ -72,6 +73,7 @@ export function workspace(s:State,p:Person) {
     acknowledgments:s.acknowledgments.filter(a=>a.subjectId===p.id||s.packets.some(k=>k.id===a.packetId&&canManage(s,p,cycle(s,k.cycleId),k.subjectId))),
     goals,
     actions,
+    advice:adviceFor(s,p),
     actionChoices:s.people.filter(x=>x.active&&actionAllowed(s,p,x.id)).map(x=>({subjectId:x.id,name:x.name,owners:eligibleOwners(s,p,x.id)})),
     outbox:p.role==='hr_admin'?s.notices.map(({id,recipientId,kind,status,attempts,diagnostic,nextAttempt})=>({id,recipientId,kind,status,attempts,diagnostic:(status==='pending'||status==='disabled')&&!mailConfigured()?notConfigured:diagnostic,nextAttempt})):[],
     audits:p.role==='hr_admin'?s.audits:[],

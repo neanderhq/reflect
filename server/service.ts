@@ -5,6 +5,7 @@ import { transaction, Database } from './db';
 import { member, hr, cycle, canManage, actionAllowed, feedbackProjection, workspace, eligibleOwners, goalWritable, packetProjection } from './policy';
 import { checkSessionInTransaction } from './session';
 import { closeoutRows } from './closeout';
+import { resolveAdvice, sendAdvice } from './advice';
 const uid=()=>randomUUID(); const now=()=>new Date(Date.now()).toISOString();
 const roles=['hr_admin','manager','employee'];
 export function audit(s:State,p:Person,action:string,targetId:string,reason?:string) {s.audits.push({id:uid(),actorId:p.id,action,targetId,at:now(),...(reason?{reason}:{})});}
@@ -185,6 +186,10 @@ export async function operation(actor:Actor,command:string,input:Record<string,u
  case 'people.preview':case 'people.apply': {hr(p);const {errors,next}=validatePeople(s,parsePeople(input.csv));if(command==='people.preview')return {errors,directoryVersion:directoryVersion(s),rows:next.map(({passwordHash,authVersion,...r})=>r)};requireThat(input.directoryVersion===directoryVersion(s),'REVISION_CONFLICT',409);requireThat(!errors.length,'CSV_VALIDATION_FAILED',422);for(const person of next){const old=s.people.find(p=>p.id===person.id);if(old&&JSON.stringify(old)!==JSON.stringify(person)){person.authVersion++;person.revision=(old.revision||0)+1;audit(s,p,'person.access_changed',person.id);}}
  s.people=next;stale(s);audit(s,p,'people.imported',p.id);break;}
  case 'person.update': {hr(p);const person=s.people.find(x=>x.id===input.id);requireThat(person,'NOT_FOUND',404);rev({revision:person.revision||0},input.revision);const rows=[{email:person.email,full_name:text(input.name,120),team:text(input.team,100),title:text(input.title,120),manager_email:input.managerId?s.people.find(x=>x.id===input.managerId)?.email||'invalid':'',role:text(input.role),active:String(input.active)}];requireThat(typeof input.active==='boolean');const {errors,next}=validatePeople(s,rows);requireThat(!errors.length,'PEOPLE_VALIDATION_FAILED',422);const updated=next.find(x=>x.id===person.id)!;updated.authVersion++;updated.revision=(person.revision||0)+1;s.people=next;stale(s);audit(s,p,'person.access_changed',person.id);break;}
+ case 'advice.send': result=sendAdvice(s,p,input);break;
+ case 'advice.reply': result=resolveAdvice(s,p,input,'answered');break;
+ case 'advice.cancel': result=resolveAdvice(s,p,input,'canceled');break;
+ case 'advice.decline': result=resolveAdvice(s,p,input,'declined');break;
  case 'goal.save': result=saveGoal(s,p,input);break;
  case 'action': saveAction(s,p,input);break;
  case 'outbox.retry': {hr(p);const n=s.notices.find(n=>n.id===input.id);requireThat(n,'NOT_FOUND',404);stale(s);requireThat(n.status==='disabled'||(n.status==='failed'&&n.diagnostic==='DELIVERY_REJECTED'&&n.attempts<5),'RETRY_NOT_SAFE',409);n.status='pending';n.nextAttempt=now();audit(s,p,'outbox.retry',n.id);break;}

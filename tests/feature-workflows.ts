@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,6 +7,7 @@ import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
+import { buildExport, restoreExport } from '../server/backup';
 import { loadState, persistState, setTestDb, type Database } from '../server/db';
 import { emptyState, type Person } from '../server/model';
 import { type workspace } from '../server/policy';
@@ -158,5 +160,72 @@ test('closeout first releases are HR-only, revision-bound and all-or-nothing', a
     assert.equal((await queue()).find(row => row.subjectId === 'blair')?.status, 'acknowledged');
     await command('hr', 'cycle.status', { id: cycleId, revision: 0, status: 'closed', reason: 'Close after releases' });
     await assert.rejects(command('casey', 'acknowledge', { id: after.packets.find(p => p.subjectId === 'casey')!.id }), /CYCLE_LOCKED/);
+  });
+});
+
+test('advice is participant-only, durable across terminal transitions and omitted from HR recovery', async () => {
+  await fixture(async db => {
+    const input = {
+      requestId: randomUUID(),
+      recipientEmail: ` BLAIR@${company.toUpperCase()}.TEST `,
+      question: 'How can I make sprint updates clearer?',
+    };
+    const send = (values = input) => command<{ id: string }>('alex', 'advice.send', values);
+    const privateReply = 'Start with one decision and what you need from the team.';
+    const before = await loadState(db, company);
+    await updatePerson(before.people.find(p => p.id === 'drew')!, { active: false });
+    for (const recipientEmail of [`alex@${company}.test`, `blair@${foreignCompany}.test`, `drew@${company}.test`, 'unknown']) {
+      await assert.rejects(send({ ...input, recipientEmail }), /ADVICE_RECIPIENT_UNAVAILABLE/);
+    }
+    await assert.rejects(send({ ...input, question: '  ' }), /ADVICE_TEXT_REQUIRED/);
+    const duplicates = await Promise.all([send(), send()]);
+    assert.deepEqual(duplicates, [{ id: input.requestId }, { id: input.requestId }]);
+    await assert.rejects(send({ ...input, question: 'Different content' }), /ADVICE_REQUEST_CONFLICT/);
+    assert.equal((await read('alex')).advice[0].incoming, false);
+    const received = (await read('blair')).advice[0];
+    assert.equal(received.incoming, true);
+    assert.equal(received.colleague, 'Alex Chen');
+    assert.equal(received.status, 'pending');
+
+    for (const outsider of ['hr', 'manager', 'casey']) {
+      assert.equal((await read(outsider)).advice.length, 0);
+      await assert.rejects(command(outsider, 'advice.reply', { id: input.requestId, reply: privateReply }), /NOT_FOUND/);
+    }
+    assert.equal((await read('blair', foreignCompany)).advice.length, 0);
+    await assert.rejects(command('blair', 'advice.reply', { id: input.requestId, reply: privateReply }, foreignCompany), /NOT_FOUND/);
+    await assert.rejects(command('alex', 'advice.reply', { id: input.requestId, reply: privateReply }), /FORBIDDEN/);
+    await assert.rejects(command('blair', 'advice.cancel', { id: input.requestId }), /FORBIDDEN/);
+    await assert.rejects(command('blair', 'advice.reply', { id: input.requestId, reply: ' ' }), /ADVICE_TEXT_REQUIRED/);
+    const reply = (text: string) => command('blair', 'advice.reply', { id: input.requestId, reply: text });
+    await reply(privateReply);
+    const answered = (await read('alex')).advice[0];
+    assert.ok(answered.status === 'answered' && answered.reply === privateReply && answered.resolvedAt);
+    await reply(privateReply);
+    assert.deepEqual((await read('alex')).advice[0], answered);
+    await assert.rejects(reply('Try a different format'), /ADVICE_CLOSED/);
+    await assert.rejects(command('alex', 'advice.cancel', { id: input.requestId }), /ADVICE_CLOSED/);
+
+    for (const [action, actor, status] of [['cancel', 'alex', 'canceled'], ['decline', 'blair', 'declined']]) {
+      const { id } = await send({ ...input, requestId: randomUUID(), question: `An example to ${action}` });
+      await command(actor, `advice.${action}`, { id });
+      await command(actor, `advice.${action}`, { id });
+      assert.equal((await read('alex')).advice.find(r => r.id === id)?.status, status);
+      assert.equal((await read('blair')).advice.find(r => r.id === id)?.status, status);
+      await assert.rejects(command('blair', 'advice.reply', { id, reply: privateReply }), /ADVICE_CLOSED/);
+    }
+
+    const after = await loadState(db, company);
+    assert.equal(after.adviceRequests.length, 3);
+    assert.deepEqual(after.notices, before.notices);
+    assert.deepEqual(after.packets, before.packets);
+    assert.ok(!JSON.stringify(after.audits).includes(input.requestId));
+    assert.ok(!JSON.stringify(await read('hr')).includes(privateReply));
+    const backup = buildExport(after, { id: 'feature-recovery', name: 'Feature recovery' });
+    assert.ok(!('adviceRequests' in backup.data));
+    assert.ok(!('adviceRequests' in backup.counts));
+    assert.ok(!JSON.stringify(backup).includes(privateReply));
+    await restoreExport(db, { ...backup, data: { ...backup.data, adviceRequests: after.adviceRequests } });
+    assert.equal((await loadState(db, 'feature-recovery')).adviceRequests.length, 0);
+    assert.ok((await loadState(db, 'feature-recovery')).packets.length > 0);
   });
 });
