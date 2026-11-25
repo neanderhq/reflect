@@ -41,6 +41,7 @@ const formErrors: Record<string, string> = {
   PHASE_DEADLINE_PASSED: 'This phase has ended. HR can extend its deadline while the cycle is open.',
   INVALID_MIN_GROUP: 'Choose a minimum group size from 3 to 100.',
   INVALID_OWNER: 'Choose an owner permitted for this employee.',
+  INVALID_DATE: 'Enter a valid due date.',
 };
 function ErrorMessage({ text }: { text: string }) {
   return text ? <p role="alert">{formErrors[text] || (text.charAt(0) + text.slice(1).toLowerCase()).replaceAll('_', ' ') + '.'}</p> : null;
@@ -233,12 +234,12 @@ export function CycleSettings({ cycle, save }: { cycle: Cycle; save: Save }) {
   </form>;
 }
 
-export function ActionEditor({data,action,save}:{data:ReturnType<typeof workspace>;action?:DevelopmentAction;save:Save}) {
+export function ActionEditor({data,action,goal,save}:{data:ReturnType<typeof workspace>;action?:DevelopmentAction;goal?:{id:string;subjectId:string};save:Save}) {
  const state=useSave();
- const [subject,setSubject]=useState(action?.subjectId||data.actionChoices[0]?.subjectId||'');
+ const [subject,setSubject]=useState(action?.subjectId||goal?.subjectId||data.actionChoices[0]?.subjectId||'');
  const choices=data.actionChoices.find(x=>x.subjectId===subject);
- return <form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=Object.fromEntries(new FormData(event.currentTarget));void state.run(()=>save({...fields,...(action?{id:action.id,revision:action.revision}:{})}));}}>
- <Label htmlFor="action-subject">For</Label><select className="native-select" id="action-subject" name="subjectId" value={subject} onChange={event=>setSubject(event.target.value)}>{data.actionChoices.filter(x=>!action||x.subjectId===action.subjectId).map(x=><option key={x.subjectId} value={x.subjectId}>{x.name}</option>)}</select>
+ return <form className="form-stack" onSubmit={event=>{event.preventDefault();const fields=Object.fromEntries(new FormData(event.currentTarget));void state.run(()=>save({...fields,...(action?{id:action.id,revision:action.revision}:goal?{goalId:goal.id}:{})}));}}>
+ <Label htmlFor="action-subject">For</Label><select className="native-select" id="action-subject" name="subjectId" value={subject} onChange={event=>setSubject(event.target.value)}>{data.actionChoices.filter(x=>!(action||goal)||x.subjectId===subject).map(x=><option key={x.subjectId} value={x.subjectId}>{x.name}</option>)}</select>
  <Label htmlFor="action-owner">Owner</Label><select key={subject} className="native-select" id="action-owner" name="ownerId" defaultValue={action?.ownerId||subject}>{choices?.owners.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
  <Label htmlFor="action-title">Action</Label><Input id="action-title" name="title" required defaultValue={action?.title}/>
  <Label htmlFor="action-due">Due date</Label><Input id="action-due" name="due" type="date" required defaultValue={action?.due.slice(0,10)}/>

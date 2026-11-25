@@ -1,9 +1,11 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { parse } from 'csv-parse/sync';
-import { Actor, State, Person, Cycle, Assignment, Template, ReviewType, reviewTypes, requireThat, text, id, email, AppError, Snapshot } from './model';
+import { Actor, State, Person, Cycle, Assignment, Template, ReviewType, DevelopmentAction, DevelopmentGoal, Summary, Packet, reviewTypes, requireThat, text, id, email, AppError, Snapshot } from './model';
 import { transaction, Database } from './db';
-import { member, hr, cycle, canManage, actionAllowed, feedbackProjection, workspace, eligibleOwners } from './policy';
+import { member, hr, cycle, canManage, actionAllowed, feedbackProjection, workspace, eligibleOwners, goalWritable, packetProjection } from './policy';
 import { checkSessionInTransaction } from './session';
+import { closeoutRows } from './closeout';
+import { resolveAdvice, sendAdvice } from './advice';
 const uid=()=>randomUUID(); const now=()=>new Date(Date.now()).toISOString();
 const roles=['hr_admin','manager','employee'];
 export function audit(s:State,p:Person,action:string,targetId:string,reason?:string) {s.audits.push({id:uid(),actorId:p.id,action,targetId,at:now(),...(reason?{reason}:{})});}
@@ -21,7 +23,14 @@ export const directoryVersion=(s:State)=>createHash('sha256').update(JSON.string
 function phase(c:Cycle,end:string) {open(c);requireThat(Date.now()>=Date.parse(c.start),'PHASE_NOT_STARTED',409);requireThat(Date.now()<=Date.parse(end),'PHASE_DEADLINE_PASSED',409);}
 function rev(entity:{revision:number},value:unknown) {requireThat(Number.isInteger(value)&&value===entity.revision,'REVISION_CONFLICT',409);}
 function open(c:Cycle) {requireThat(c.status==='open','CYCLE_LOCKED',409);}
-function date(v:unknown) { const d=text(v,40);requireThat(/^\d{4}-\d{2}-\d{2}(T.*)?$/.test(d)&&Number.isFinite(Date.parse(d)),'INVALID_DATE');return new Date(d).toISOString(); }
+function date(v:unknown) {
+ const d=text(v,40);
+ const day=d.slice(0,10);
+ const midnight=Date.parse(day);
+ requireThat(/^\d{4}-\d{2}-\d{2}(T.*)?$/.test(d) && Number.isFinite(Date.parse(d)) &&
+   Number.isFinite(midnight) && new Date(midnight).toISOString().slice(0,10)===day,'INVALID_DATE');
+ return new Date(d).toISOString();
+}
 function rating(v:unknown) {requireThat(Number.isInteger(v)&&Number(v)>=1&&Number(v)<=5,'INVALID_RATING');return Number(v);}
 export function generate(s:State,p:Person,c:Cycle) {
  const add=(type:ReviewType,authorId:string,subjectId:string)=>{
@@ -60,6 +69,87 @@ export function parsePeople(csv:unknown) {
  const expected=['email','full_name','team','title','manager_email','role','active'];const headers=records[0]; requireThat(headers.length===7&&new Set(headers).size===7&&headers.every(h=>expected.includes(h)),'INVALID_HEADERS');
  return records.slice(1).map(row=>Object.fromEntries(headers.map((h,i)=>[h,row[i]])));
 }
+function actionFields(s:State,p:Person,subjectId:string,input:Record<string,unknown>) {
+ const ownerId=id(input.ownerId);
+ requireThat(eligibleOwners(s,p,subjectId).some(x=>x.id===ownerId),'INVALID_OWNER');
+ const progress=text(input.progress) as DevelopmentAction['progress'];
+ requireThat(['planned','in_progress','complete'].includes(progress));
+ const title=text(input.title,200);
+ requireThat(title);
+ return {subjectId,ownerId,title,notes:text(input.notes,10000),due:date(input.due),progress};
+}
+function saveGoal(s:State,p:Person,input:Record<string,unknown>) {
+ const title=text(input.title,200),successMeasure=text(input.successMeasure,2000);
+ requireThat(title && successMeasure,'GOAL_FIELDS_REQUIRED');
+ if(input.id!==undefined) {
+  const goalId=id(input.id);
+  const goal=s.goals.find(g=>g.id===goalId);
+  requireThat(goal && actionAllowed(s,p,goal.subjectId),'NOT_FOUND',404);
+  requireThat(goalWritable(s,p,goal.subjectId),'FORBIDDEN',403);
+  rev(goal,input.revision);
+  Object.assign(goal,{title,successMeasure,revision:goal.revision+1});
+  audit(s,p,'goal.saved',goal.id);
+  return {id:goal.id};
+ }
+ const packetId=id(input.packetId);
+ const packet=s.packets.find(x=>x.id===packetId);
+ requireThat(packet && packetProjection(s,p,packet),'NOT_FOUND',404);
+ requireThat(goalWritable(s,p,packet.subjectId),'FORBIDDEN',403);
+ requireThat(!s.goals.some(g=>g.packetId===packet.id),'GOAL_EXISTS',409);
+ const goal:DevelopmentGoal={id:uid(),subjectId:packet.subjectId,packetId:packet.id,title,successMeasure,revision:0};
+ requireThat(text(input.actionTitle,200),'ACTION_TITLE_REQUIRED');
+ const fields=actionFields(s,p,goal.subjectId,{ownerId:input.ownerId,title:input.actionTitle,due:input.due,notes:'',progress:'planned'});
+ s.goals.push(goal);
+ const action:DevelopmentAction={id:uid(),goalId:goal.id,...fields,revision:0};
+ s.actions.push(action);
+ audit(s,p,'goal.saved',goal.id);
+ audit(s,p,'action.saved',action.id);
+ return {id:goal.id};
+}
+function saveAction(s:State,p:Person,input:Record<string,unknown>) {
+ const subjectId=id(input.subjectId);
+ requireThat(s.people.some(x=>x.id===subjectId)&&actionAllowed(s,p,subjectId),'FORBIDDEN',403);
+ const existing=input.id?s.actions.find(x=>x.id===input.id):undefined;
+ if(input.id)requireThat(existing,'NOT_FOUND',404);
+ if(existing) {
+  requireThat(existing.subjectId===subjectId,'FORBIDDEN',403);
+  rev(existing,input.revision);
+ }
+ const goalId=existing?existing.goalId:input.goalId===undefined?undefined:id(input.goalId);
+ if(goalId) {
+  requireThat(s.goals.some(g=>g.id===goalId&&g.subjectId===subjectId),'NOT_FOUND',404);
+  requireThat(goalWritable(s,p,subjectId),'FORBIDDEN',403);
+ }
+ const fields=actionFields(s,p,subjectId,input);
+ const action=existing??{id:uid(),...(goalId?{goalId}:{}),...fields,revision:0};
+ if(existing)Object.assign(existing,{...fields,revision:existing.revision+1});
+ else s.actions.push(action);
+ audit(s,p,'action.saved',action.id);
+}
+function publishPacket(state: State, actor: Person, cycle: Cycle, summary: Summary, version: number): Packet {
+ const {subjectId,text,originalRating,rating,calibrationReason}=summary;
+ const packet={id:uid(),cycleId:cycle.id,subjectId,version,releasedAt:now(),summary:text,originalRating,rating,
+   calibrationReason,feedback:feedbackProjection(state,cycle,subjectId)};
+ state.packets.push(packet);
+ enqueue(state,subjectId,'release',`release:${packet.id}`,'/?view=history');
+ audit(state,actor,'packet.released',packet.id);
+ return packet;
+}
+function publishReadyPackets(state: State, actor: Person, cycle: Cycle, selection: unknown) {
+ requireThat(Array.isArray(selection)&&selection.length>0&&selection.length<=100,'INVALID_CLOSEOUT_SELECTION');
+ const rows=new Map(closeoutRows(state,cycle,Date.now()).map(row=>[row.subjectId,row]));
+ const seen=new Set<string>();
+ const summaries=selection.map((entry: unknown)=>{
+   requireThat(entry&&typeof entry==='object'&&'subjectId' in entry&&'token' in entry,'INVALID_CLOSEOUT_SELECTION');
+   const subjectId=id(entry.subjectId);
+   requireThat(!seen.has(subjectId),'INVALID_CLOSEOUT_SELECTION');
+   seen.add(subjectId);
+   const row=rows.get(subjectId);
+   requireThat(row?.status==='ready'&&row.token===entry.token,'CLOSEOUT_CHANGED',409);
+   return state.summaries.find(summary=>summary.cycleId===cycle.id&&summary.subjectId===subjectId)!;
+ });
+ return {released:summaries.map(summary=>publishPacket(state,actor,cycle,summary,1).id)};
+}
 export async function operation(actor:Actor,command:string,input:Record<string,unknown>) {
  return transaction(actor.companyId,async(s,db)=>{await checkSessionInTransaction(actor,db,s); const p=member(s,actor.personId);let result:unknown={ok:true};
  switch(command) {
@@ -89,12 +179,23 @@ export async function operation(actor:Actor,command:string,input:Record<string,u
  case 'calibrate': {hr(p);const x=s.summaries.find(x=>x.id===input.id);requireThat(x,'NOT_FOUND',404);open(cycle(s,x.cycleId));rev(x,input.revision);const reason=text(input.reason,1000);requireThat(reason,'REASON_REQUIRED');const prior={rating:x.rating,originalRating:x.originalRating,reason:x.calibrationReason};x.rating=rating(input.rating);x.calibrationReason=reason;x.revision++;audit(s,p,'summary.calibrated',x.id,reason);s.audits.at(-1)!.before=prior;s.audits.at(-1)!.after={rating:x.rating,originalRating:x.originalRating,reason};break;}
  case 'release': {hr(p);const c=cycle(s,id(input.cycleId));open(c);requireThat(Date.now()>=Date.parse(c.releaseDate),'RELEASE_NOT_DUE',409);const subjectId=id(input.subjectId);const x=s.summaries.find(x=>x.cycleId===c.id&&x.subjectId===subjectId);requireThat(x,'SUMMARY_REQUIRED');rev(x,input.revision);requireThat(!s.assignments.some(a=>a.cycleId===c.id&&a.subjectId===subjectId&&a.status!=='submitted'),'REVIEWS_INCOMPLETE',409);
  const old=s.packets.filter(k=>k.cycleId===c.id&&k.subjectId===subjectId);requireThat(input.expectedVersion===old.length,'PACKET_VERSION_CONFLICT',409);
- const packet={id:uid(),cycleId:c.id,subjectId,version:old.length+1,releasedAt:now(),summary:x.text,originalRating:x.originalRating,rating:x.rating,calibrationReason:x.calibrationReason,feedback:feedbackProjection(s,c,subjectId)};s.packets.push(packet);enqueue(s,subjectId,'release',`release:${packet.id}`,'/?view=history');audit(s,p,'packet.released',packet.id);result=packet;break;}
+ result=publishPacket(s,p,c,x,old.length+1);break;}
+ case 'cycle.closeout': {
+  hr(p);
+  const c=cycle(s,id(input.cycleId));
+  return { status:c.status, rows:closeoutRows(s,c,Date.now()) };
+ }
+ case 'release.batch': {hr(p);result=publishReadyPackets(s,p,cycle(s,id(input.cycleId)),input.selection);break;}
  case 'acknowledge': {const packet=s.packets.find(x=>x.id===input.id&&x.subjectId===p.id);requireThat(packet,'NOT_FOUND',404);open(cycle(s,packet.cycleId));if(!s.acknowledgments.some(x=>x.packetId===packet.id)){s.acknowledgments.push({id:uid(),packetId:packet.id,subjectId:p.id,at:now()});audit(s,p,'packet.acknowledged',packet.id);}break;}
  case 'people.preview':case 'people.apply': {hr(p);const {errors,next}=validatePeople(s,parsePeople(input.csv));if(command==='people.preview')return {errors,directoryVersion:directoryVersion(s),rows:next.map(({passwordHash,authVersion,...r})=>r)};requireThat(input.directoryVersion===directoryVersion(s),'REVISION_CONFLICT',409);requireThat(!errors.length,'CSV_VALIDATION_FAILED',422);for(const person of next){const old=s.people.find(p=>p.id===person.id);if(old&&JSON.stringify(old)!==JSON.stringify(person)){person.authVersion++;person.revision=(old.revision||0)+1;audit(s,p,'person.access_changed',person.id);}}
  s.people=next;stale(s);audit(s,p,'people.imported',p.id);break;}
  case 'person.update': {hr(p);const person=s.people.find(x=>x.id===input.id);requireThat(person,'NOT_FOUND',404);rev({revision:person.revision||0},input.revision);const rows=[{email:person.email,full_name:text(input.name,120),team:text(input.team,100),title:text(input.title,120),manager_email:input.managerId?s.people.find(x=>x.id===input.managerId)?.email||'invalid':'',role:text(input.role),active:String(input.active)}];requireThat(typeof input.active==='boolean');const {errors,next}=validatePeople(s,rows);requireThat(!errors.length,'PEOPLE_VALIDATION_FAILED',422);const updated=next.find(x=>x.id===person.id)!;updated.authVersion++;updated.revision=(person.revision||0)+1;s.people=next;stale(s);audit(s,p,'person.access_changed',person.id);break;}
- case 'action': {const subjectId=id(input.subjectId);requireThat(s.people.some(x=>x.id===subjectId)&&actionAllowed(s,p,subjectId),'FORBIDDEN',403);const ownerId=id(input.ownerId);requireThat(eligibleOwners(s,p,subjectId).some(x=>x.id===ownerId),'INVALID_OWNER');const progress=text(input.progress);requireThat(['planned','in_progress','complete'].includes(progress));let a=input.id?s.actions.find(x=>x.id===input.id):undefined;if(input.id)requireThat(a,'NOT_FOUND',404);if(a){requireThat(a.subjectId===subjectId,'FORBIDDEN',403);rev(a,input.revision);}const fields={subjectId,ownerId,title:text(input.title,200),notes:text(input.notes,10000),due:date(input.due),progress:progress as 'planned'|'in_progress'|'complete'};requireThat(fields.title);if(a){Object.assign(a,fields);a.revision++;}else {a={id:uid(),...fields,revision:0};s.actions.push(a);}audit(s,p,'action.saved',a.id);break;}
+ case 'advice.send': result=sendAdvice(s,p,input);break;
+ case 'advice.reply': result=resolveAdvice(s,p,input,'answered');break;
+ case 'advice.cancel': result=resolveAdvice(s,p,input,'canceled');break;
+ case 'advice.decline': result=resolveAdvice(s,p,input,'declined');break;
+ case 'goal.save': result=saveGoal(s,p,input);break;
+ case 'action': saveAction(s,p,input);break;
  case 'outbox.retry': {hr(p);const n=s.notices.find(n=>n.id===input.id);requireThat(n,'NOT_FOUND',404);stale(s);requireThat(n.status==='disabled'||(n.status==='failed'&&n.diagnostic==='DELIVERY_REJECTED'&&n.attempts<5),'RETRY_NOT_SAFE',409);n.status='pending';n.nextAttempt=now();audit(s,p,'outbox.retry',n.id);break;}
  case 'notice.read': {const n=s.notices.find(n=>n.id===input.id&&n.recipientId===p.id);requireThat(n,'NOT_FOUND',404);n.read=true;break;}
  case 'reminders': {hr(p);for(const a of s.assignments){const c=cycle(s,a.cycleId);if(c.status==='open'&&Date.now()>=Date.parse(c.start)&&a.status==='draft'&&Date.parse(c.reviewDue)>=Date.now()&&Date.parse(c.reviewDue)-Date.now()<7*86400000)enqueue(s,a.authorId,'reminder',`reminder:${a.id}:${c.reviewDue}`,`/?view=reviews&review=${encodeURIComponent(a.id)}`,{cycleId:c.id,assignmentId:a.id,due:c.reviewDue});}stale(s);audit(s,p,'reminders.queued',p.id);break;}

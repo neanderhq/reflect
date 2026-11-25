@@ -2,7 +2,7 @@
 
 A performance review app for HR, managers and employees, inspired by Lattice and built with [Neander](https://neander.ai).
 
-![Reflect overview](.neander/thumbnail.png)
+![Reflect development goal and its linked action](.neander/thumbnail.png)
 
 Plan review cycles, collect self/manager/upward/peer feedback, calibrate summaries, release results and track development actions. Reflect includes role-scoped access, private drafts, versioned result packets, acknowledgments, CSV imports, privacy-aware reports, CSV/PDF exports and an email outbox.
 

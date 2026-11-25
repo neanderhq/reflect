@@ -14,11 +14,22 @@ export interface Summary extends Entity { cycleId: string; subjectId: string; te
 export interface Feedback { type: ReviewType; authorName?: string; answers: { question: string; value: string | number }[] }
 export interface Packet extends Entity { cycleId: string; subjectId: string; version: number; releasedAt: string; summary: string; originalRating: number; rating: number; calibrationReason: string; feedback: Feedback[] }
 export interface Acknowledgment extends Entity { packetId: string; subjectId: string; at: string }
-export interface DevelopmentAction extends Entity { subjectId: string; ownerId: string; title: string; notes: string; due: string; progress: 'planned' | 'in_progress' | 'complete'; revision: number }
+export interface DevelopmentGoal extends Entity { subjectId: string; packetId: string; title: string; successMeasure: string; revision: number }
+export interface DevelopmentAction extends Entity { goalId?: string; subjectId: string; ownerId: string; title: string; notes: string; due: string; progress: 'planned' | 'in_progress' | 'complete'; revision: number }
+export type AdviceRequest = Entity & {
+  requesterId: string;
+  recipientId: string;
+  question: string;
+  createdAt: string;
+} & (
+  | { status: 'pending' }
+  | { status: 'answered'; reply: string; resolvedAt: string }
+  | { status: 'canceled' | 'declined'; resolvedAt: string }
+);
 export interface Audit extends Entity { actorId: string; action: string; targetId: string; at: string; reason?: string; before?: unknown; after?: unknown }
 export interface Notice extends Entity { recipientId: string; kind: 'assignment' | 'reminder' | 'release' | 'invite' | 'reset'; key: string; cycleId?: string; assignmentId?: string; due?: string; href: string; status: 'pending' | 'claimed' | 'disabled' | 'sent' | 'stale' | 'failed'; attempts: number; nextAttempt: string; claim?: string; claimedAt?: string; diagnostic?: string; read: boolean }
-export interface State { people: Person[]; templates: Template[]; cycles: Cycle[]; assignments: Assignment[]; nominations: Nomination[]; summaries: Summary[]; packets: Packet[]; acknowledgments: Acknowledgment[]; actions: DevelopmentAction[]; audits: Audit[]; notices: Notice[] }
-export const collections = ['people','templates','cycles','assignments','nominations','summaries','packets','acknowledgments','actions','audits','notices'] as const;
+export interface State { people: Person[]; templates: Template[]; cycles: Cycle[]; assignments: Assignment[]; nominations: Nomination[]; summaries: Summary[]; packets: Packet[]; acknowledgments: Acknowledgment[]; goals: DevelopmentGoal[]; actions: DevelopmentAction[]; adviceRequests: AdviceRequest[]; audits: Audit[]; notices: Notice[] }
+export const collections = ['people','templates','cycles','assignments','nominations','summaries','packets','acknowledgments','goals','actions','adviceRequests','audits','notices'] as const;
 export const emptyState = (): State => Object.fromEntries(collections.map(k=>[k,[]])) as unknown as State;
 export interface Actor { companyId: string; personId: string; sessionHash?: string; version?: number }
 export class AppError extends Error { constructor(public code: string, public status = 400, public details?: unknown) { super(code); } }

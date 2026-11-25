@@ -4,25 +4,32 @@ title: Reflect
 description: |
   **Run thoughtful performance reviews in one workspace.**
 
-  Reflect brings HR, managers and employees together for self, manager, upward and peer reviews. Plan review cycles, calibrate summaries, release results and follow through with development actions.
+  Reflect brings HR, managers and employees together for self, manager, upward and peer reviews. Plan review cycles, calibrate summaries and track readiness and acknowledgments in HR closeout. Release results for selected participants who are ready.
 
-  Explore a fictional team with an active review cycle and completed review history. Email delivery and unattended reminders use your own provider and scheduler configuration.
+  Turn a released review into a development goal with a dated action. Between cycles, ask a coworker for private, in-app advice.
+
+  Explore with a fictional team, an active review cycle and released results. Email delivery and unattended reminders use your own provider and scheduler configuration.
 category: People & HR
 best_for: People teams and managers running structured performance reviews
 features:
   - Review cycles and versioned review templates
   - Self, manager, upward and peer reviews
   - Calibration and versioned result packets
-  - Employee acknowledgment and development actions
+  - HR closeout queue with batch first releases and acknowledgment tracking
+  - Development goals linked to released review versions, with dated actions
+  - Private advice requests and replies between coworkers
   - Privacy-aware reports and CSV/PDF exports
   - Role-scoped HR, manager and employee workspaces
 included:
-  - Performance review application
+  - Performance review workspace with development goals, HR closeout and private advice
   - PostgreSQL migrations
-  - Fictional team and sample review history
+  - Fictional team, active review cycle and released results
   - Provider email and scheduler configuration guide
 thumbnail: .neander/thumbnail.png
 screenshots:
+  - .neander/screenshots/development-goal-from-results.png
+  - .neander/screenshots/cycle-closeout.png
+  - .neander/screenshots/private-advice.png
   - .neander/screenshots/people.png
   - .neander/screenshots/reviews.png
 commands:
